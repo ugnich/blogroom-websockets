@@ -1,0 +1,44 @@
+<html>
+<head>
+    <meta charset="utf-8">
+    <title></title>
+</head>
+<body>
+<script type="text/javascript">
+    var socket;
+    if (!window.WebSocket) {
+        window.WebSocket = window.MozWebSocket;
+    }
+    if (window.WebSocket) {
+        socket = new WebSocket("ws://localhost:9000/ws/1");
+        socket.onmessage = function (event) {
+            document.getElementById("log").value += event.data +"\n";
+            console.log(event.data);
+        };
+        socket.onopen = function (event) {
+            console.log("websocket open");
+        };
+        socket.onclose = function (event) {
+            console.log("websocket closed");
+        };
+    }
+
+    function send(message) {
+        if (!window.WebSocket) {
+            return;
+        }
+        if (socket.readyState == WebSocket.OPEN) {
+            socket.send(message);
+        } else {
+            alert("The socket is not open.");
+        }
+    }
+</script>
+<form onsubmit="return false;">
+    <input type="text" name="message" value="Hello, World!"/>
+    <input type="button" value="Send Web Socket Data" onclick="send(this.form.message.value)"/>
+</form>
+
+<textarea id="log" rows="10" style="width: 100%"></textarea>
+</body>
+</html>
