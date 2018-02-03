@@ -24,8 +24,8 @@ import org.json.JSONObject;
  */
 public class HttpHandler extends ChannelInboundHandlerAdapter {
     
-    private static Map<Integer, ChannelGroup> channelGroups = new ConcurrentHashMap<Integer, ChannelGroup>();
-    int roomid = 0;
+    private static Map<Integer, Room> rooms = new ConcurrentHashMap<Integer, Room>();
+    int room_id = 0;
     
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
@@ -36,10 +36,10 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
     @Override
     public void handlerRemoved(ChannelHandlerContext context) throws Exception {
         System.out.println("Removed");
-        if (roomid > 0) {
-            ChannelGroup cg = channelGroups.get(roomid);
-            if (cg != null) {
-                cg.remove(context.channel());
+        if (room_id > 0) {
+            Room r = rooms.get(room_id);
+            if (r != null && r.channelGroup != null) {
+                r.channelGroup.remove(context.channel());
                 broadcastStatus(context);
             }
         }
@@ -68,18 +68,19 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
         if ((headers.get("Connection") != null && headers.get("Connection").equalsIgnoreCase("Upgrade"))
                 || (headers.get("Upgrade") != null && headers.get("Upgrade").equalsIgnoreCase("WebSocket"))) {
             try {
-                roomid = Integer.parseInt(request.uri().substring("/ws/".length()));
+                room_id = Integer.parseInt(request.uri().substring("/ws/".length()));
             } catch (Exception e) {
             }
-            if (roomid > 0) {
-                ChannelGroup cg = channelGroups.get(roomid);
-                if (cg == null) {
-                    cg = new DefaultChannelGroup(GlobalEventExecutor.INSTANCE);
-                    channelGroups.put(roomid, cg);
+            if (room_id > 0) {
+                Room r = rooms.get(room_id);
+                if (r == null) {
+                    r = new Room(room_id);
+                    rooms.put(room_id, r);
                 }
-                cg.add(context.channel());
+                r.channelGroup.add(context.channel());
                 handleHandshake(context, request);
                 broadcastStatus(context);
+                sendHistory(context, r);
             }
         }
     }
@@ -102,19 +103,13 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
     private void handleTextFrame(ChannelHandlerContext context, TextWebSocketFrame frame) {
         String txt = frame.text();
         System.out.println("TextWebSocketFrame Received: " + txt);
-        JSONObject jsonRoot = new JSONObject();
-        try {
-            JSONObject jsonMessage = new JSONObject();
-            jsonMessage.put("text", txt);
-            jsonRoot.put("message", jsonMessage);
-        } catch (Exception e) {
-        }
-        broadcast(context, new TextWebSocketFrame(jsonRoot.toString()));
+        broadcast(context, new TextWebSocketFrame(generateJsonMessage(txt)));
+        rooms.get(room_id).addHistory(txt);
     }
     
     private void broadcast(ChannelHandlerContext context, WebSocketFrame frame) {
-        if (roomid > 0) {
-            ChannelGroup cg = channelGroups.get(roomid);
+        if (room_id > 0) {
+            ChannelGroup cg = rooms.get(room_id).channelGroup;
             for (Channel channel : cg) {
                 channel.writeAndFlush(frame.retainedDuplicate());
             }
@@ -123,12 +118,30 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
     }
     
     private void broadcastStatus(ChannelHandlerContext context) {
-        if (roomid > 0) {
-            ChannelGroup cg = channelGroups.get(roomid);
+        if (room_id > 0) {
+            ChannelGroup cg = rooms.get(room_id).channelGroup;
             TextWebSocketFrame statusFrame = new TextWebSocketFrame("{\"status\":{\"online\":" + cg.size() + "}}");
             for (Channel channel : cg) {
                 channel.writeAndFlush(statusFrame.retainedDuplicate());
             }
         }
+    }
+    
+    private String generateJsonMessage(String txt) {
+        JSONObject jsonRoot = new JSONObject();
+        try {
+            JSONObject jsonMessage = new JSONObject();
+            jsonMessage.put("text", txt);
+            jsonRoot.put("message", jsonMessage);
+        } catch (Exception e) {
+        }
+        return jsonRoot.toString();
+    }
+    
+    private void sendHistory(ChannelHandlerContext context, Room room) {
+        for (String text : room.history) {
+            context.channel().write(new TextWebSocketFrame(generateJsonMessage(text)));
+        }
+        context.channel().flush();
     }
 }
