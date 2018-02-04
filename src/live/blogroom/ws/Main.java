@@ -13,6 +13,9 @@ import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 
 /**
  *
@@ -21,11 +24,19 @@ import io.netty.handler.logging.LoggingHandler;
 public class Main {
 
     private static final int PORT = 9000;
+    private static Connection sql = null;
 
     /**
      * @param args the command line arguments
      */
     public static void main(String[] args) {
+        try {
+            Class.forName("com.mysql.jdbc.Driver");
+            sql = DriverManager.getConnection("jdbc:mysql://localhost/blogroom?autoReconnect=true&user=root&password=");
+        } catch (Exception e) {
+            sql = null;
+        }
+
         EventLoopGroup bossGroup = new NioEventLoopGroup(1);
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         try {
@@ -38,7 +49,7 @@ public class Main {
                     ChannelPipeline pipeline = c.pipeline();
                     pipeline.addLast(new HttpServerCodec());
                     pipeline.addLast(new HttpObjectAggregator(65536));
-                    pipeline.addLast(new HttpHandler());
+                    pipeline.addLast(new HttpHandler(sql));
                 }
             });
 
@@ -50,6 +61,13 @@ public class Main {
         } finally {
             bossGroup.shutdownGracefully();
             workerGroup.shutdownGracefully();
+        }
+
+        if (sql != null) {
+            try {
+                sql.close();
+            } catch (SQLException e) {
+            }
         }
     }
 }

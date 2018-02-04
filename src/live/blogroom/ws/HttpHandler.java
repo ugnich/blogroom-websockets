@@ -1,10 +1,10 @@
 package live.blogroom.ws;
 
+import com.ugnich.onelinesql.OneLineSQL;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.group.ChannelGroup;
-import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpRequest;
 import io.netty.handler.codec.http.websocketx.PingWebSocketFrame;
@@ -13,7 +13,7 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
-import io.netty.util.concurrent.GlobalEventExecutor;
+import java.sql.Connection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import org.json.JSONObject;
@@ -23,16 +23,22 @@ import org.json.JSONObject;
  * @author ugnich
  */
 public class HttpHandler extends ChannelInboundHandlerAdapter {
-    
+
+    private Connection sql;
     private static Map<Integer, Room> rooms = new ConcurrentHashMap<Integer, Room>();
     int room_id = 0;
-    
+
+    public HttpHandler(Connection sql) {
+        super();
+        this.sql = sql;
+    }
+
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         super.handlerAdded(ctx);
         System.out.println("added");
     }
-    
+
     @Override
     public void handlerRemoved(ChannelHandlerContext context) throws Exception {
         System.out.println("Removed");
@@ -45,7 +51,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
         }
         super.handlerRemoved(context);
     }
-    
+
     @Override
     public void channelRead(ChannelHandlerContext context, Object msg) throws Exception {
         if (msg instanceof HttpRequest) {
@@ -56,13 +62,13 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
             handlePingFrame(context, (PingWebSocketFrame) msg);
         }
     }
-    
+
     @Override
     public void exceptionCaught(ChannelHandlerContext context, Throwable cause) {
         cause.printStackTrace();
         context.close();
     }
-    
+
     private void handleHttp(ChannelHandlerContext context, HttpRequest request) {
         HttpHeaders headers = request.headers();
         if ((headers.get("Connection") != null && headers.get("Connection").equalsIgnoreCase("Upgrade"))
@@ -84,7 +90,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
             }
         }
     }
-    
+
     private void handleHandshake(ChannelHandlerContext context, HttpRequest request) {
         String wsurl = "ws://" + request.headers().get("Host") + request.uri();
         WebSocketServerHandshakerFactory wsFactory = new WebSocketServerHandshakerFactory(wsurl, null, true);
@@ -95,18 +101,20 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
             WebSocketServerHandshakerFactory.sendUnsupportedVersionResponse(context.channel());
         }
     }
-    
+
     private void handlePingFrame(ChannelHandlerContext context, PingWebSocketFrame frame) {
         context.channel().writeAndFlush(new PongWebSocketFrame((frame.content())));
     }
-    
+
     private void handleTextFrame(ChannelHandlerContext context, TextWebSocketFrame frame) {
-        String txt = frame.text();
-        System.out.println("TextWebSocketFrame Received: " + txt);
-        broadcast(context, new TextWebSocketFrame(generateJsonMessage(txt)));
-        rooms.get(room_id).addHistory(txt);
+        String txt = frame.text().trim();
+        if (!txt.isEmpty()) {
+            broadcast(context, new TextWebSocketFrame(generateJsonMessage(txt)));
+            rooms.get(room_id).addHistory(txt);
+            OneLineSQL.execute(sql, "INSERT INTO comments(post_id,comment_id,txt) VALUES (?,?,?)", room_id, Long.toString(System.currentTimeMillis()), txt);
+        }
     }
-    
+
     private void broadcast(ChannelHandlerContext context, WebSocketFrame frame) {
         if (room_id > 0) {
             ChannelGroup cg = rooms.get(room_id).channelGroup;
@@ -116,7 +124,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
             System.out.println("  - sent to " + cg.size() + " clients");
         }
     }
-    
+
     private void broadcastStatus(ChannelHandlerContext context) {
         if (room_id > 0) {
             ChannelGroup cg = rooms.get(room_id).channelGroup;
@@ -126,7 +134,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
             }
         }
     }
-    
+
     private String generateJsonMessage(String txt) {
         JSONObject jsonRoot = new JSONObject();
         try {
@@ -137,7 +145,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
         }
         return jsonRoot.toString();
     }
-    
+
     private void sendHistory(ChannelHandlerContext context, Room room) {
         for (String text : room.history) {
             context.channel().write(new TextWebSocketFrame(generateJsonMessage(text)));
