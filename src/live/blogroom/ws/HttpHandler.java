@@ -46,7 +46,12 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
             Room r = rooms.get(room_id);
             if (r != null && r.channelGroup != null) {
                 r.channelGroup.remove(context.channel());
-                broadcastStatus(context);
+                if (r.channelGroup.isEmpty()) {
+                    r.channelGroup = null;
+                    rooms.remove(room_id);
+                } else {
+                    broadcastStatus(context);
+                }
             }
         }
         super.handlerRemoved(context);
@@ -81,6 +86,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
                 Room r = rooms.get(room_id);
                 if (r == null) {
                     r = new Room(room_id);
+                    r.history = OneLineSQL.getArrayString(sql, "SELECT txt FROM (SELECT txt,comment_id FROM comments WHERE post_id=? ORDER BY comment_id DESC LIMIT 20) AS t ORDER BY comment_id ASC", room_id);
                     rooms.put(room_id, r);
                 }
                 r.channelGroup.add(context.channel());
@@ -111,7 +117,9 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
         if (!txt.isEmpty()) {
             broadcast(context, new TextWebSocketFrame(generateJsonMessage(txt)));
             rooms.get(room_id).addHistory(txt);
-            OneLineSQL.execute(sql, "INSERT INTO comments(post_id,comment_id,txt) VALUES (?,?,?)", room_id, Long.toString(System.currentTimeMillis()), txt);
+            if (OneLineSQL.execute(sql, "INSERT INTO comments(post_id,comment_id,txt) VALUES (?,?,?)", room_id, Long.toString(System.currentTimeMillis()), txt) > 0) {
+                OneLineSQL.execute(sql, "UPDATE posts SET comments_cnt=comments_cnt+1 WHERE post_id=?", room_id);
+            }
         }
     }
 
