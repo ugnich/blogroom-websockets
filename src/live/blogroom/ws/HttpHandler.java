@@ -17,7 +17,6 @@ import java.net.URI;
 import java.sql.Connection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import org.json.JSONObject;
 
 /**
  *
@@ -93,7 +92,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
                 Room r = rooms.get(room_id);
                 if (r == null) {
                     r = new Room(room_id);
-                    r.history = OneLineSQL.getArrayString(sql, "SELECT txt FROM (SELECT txt,comment_id FROM comments WHERE post_id=? ORDER BY comment_id DESC LIMIT 20) AS t ORDER BY comment_id ASC", room_id);
+                    r.loadHistoryFromSQL(sql);
                     rooms.put(room_id, r);
                 }
                 r.channelGroup.add(context.channel());
@@ -122,9 +121,12 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
     private void handleTextFrame(ChannelHandlerContext context, TextWebSocketFrame frame) {
         String txt = frame.text().trim();
         if (!txt.isEmpty()) {
-            broadcast(context, new TextWebSocketFrame(generateJsonMessage(txt)));
-            rooms.get(room_id).addHistory(txt);
-            if (OneLineSQL.execute(sql, "INSERT INTO comments(post_id,comment_id,user_hash,txt) VALUES (?,?,?,?)", room_id, Long.toString(System.currentTimeMillis()), hash, txt) > 0) {
+            Message msg = new Message();
+            msg.text = txt;
+            msg.comment_id = Long.toString(System.currentTimeMillis());
+            broadcast(context, new TextWebSocketFrame(msg.toJSON().toString()));
+            rooms.get(room_id).addHistory(msg);
+            if (OneLineSQL.execute(sql, "INSERT INTO comments(post_id,comment_id,user_hash,txt) VALUES (?,?,?,?)", room_id, msg.comment_id, hash, txt) > 0) {
                 OneLineSQL.execute(sql, "UPDATE posts SET comments_cnt=comments_cnt+1 WHERE post_id=?", room_id);
             }
         }
@@ -150,20 +152,9 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
         }
     }
 
-    private String generateJsonMessage(String txt) {
-        JSONObject jsonRoot = new JSONObject();
-        try {
-            JSONObject jsonMessage = new JSONObject();
-            jsonMessage.put("text", txt);
-            jsonRoot.put("message", jsonMessage);
-        } catch (Exception e) {
-        }
-        return jsonRoot.toString();
-    }
-
     private void sendHistory(ChannelHandlerContext context, Room room) {
-        for (String text : room.history) {
-            context.channel().write(new TextWebSocketFrame(generateJsonMessage(text)));
+        for (Message msg : room.history) {
+            context.channel().write(new TextWebSocketFrame(msg.toJSON().toString()));
         }
         context.channel().flush();
     }
