@@ -13,6 +13,7 @@ import io.netty.handler.codec.http.websocketx.TextWebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketFrame;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshaker;
 import io.netty.handler.codec.http.websocketx.WebSocketServerHandshakerFactory;
+import java.net.URI;
 import java.sql.Connection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +28,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
     private Connection sql;
     private static Map<Integer, Room> rooms = new ConcurrentHashMap<Integer, Room>();
     int room_id = 0;
+    String hash = "";
 
     public HttpHandler(Connection sql) {
         super();
@@ -79,8 +81,13 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
         if ((headers.get("Connection") != null && headers.get("Connection").equalsIgnoreCase("Upgrade"))
                 || (headers.get("Upgrade") != null && headers.get("Upgrade").equalsIgnoreCase("WebSocket"))) {
             try {
-                room_id = Integer.parseInt(request.uri().substring("/ws/".length()));
+                URI uri = new URI(request.uri());
+                room_id = Integer.parseInt(uri.getPath().substring("/ws/".length()));
+                if (uri.getQuery() != null && uri.getQuery().startsWith("hash=") && uri.getQuery().length() == 37) {
+                    hash = uri.getQuery().substring(5);
+                }
             } catch (Exception e) {
+                System.err.println(e.toString());
             }
             if (room_id > 0) {
                 Room r = rooms.get(room_id);
@@ -117,7 +124,7 @@ public class HttpHandler extends ChannelInboundHandlerAdapter {
         if (!txt.isEmpty()) {
             broadcast(context, new TextWebSocketFrame(generateJsonMessage(txt)));
             rooms.get(room_id).addHistory(txt);
-            if (OneLineSQL.execute(sql, "INSERT INTO comments(post_id,comment_id,txt) VALUES (?,?,?)", room_id, Long.toString(System.currentTimeMillis()), txt) > 0) {
+            if (OneLineSQL.execute(sql, "INSERT INTO comments(post_id,comment_id,user_hash,txt) VALUES (?,?,?,?)", room_id, Long.toString(System.currentTimeMillis()), hash, txt) > 0) {
                 OneLineSQL.execute(sql, "UPDATE posts SET comments_cnt=comments_cnt+1 WHERE post_id=?", room_id);
             }
         }
