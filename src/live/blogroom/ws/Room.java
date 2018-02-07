@@ -40,7 +40,8 @@ public class Room {
             stmt = sql.prepareStatement("SELECT comment_id,txt FROM (SELECT comment_id,txt FROM comments WHERE post_id=? ORDER BY comment_id DESC LIMIT 10) AS t ORDER BY comment_id ASC");
             stmt.setInt(1, room_id);
             rs = stmt.executeQuery();
-            if (rs.first()) {
+            rs.beforeFirst();
+            while (rs.next()) {
                 Message msg = new Message();
                 msg.comment_id = rs.getString(1);
                 msg.text = rs.getString(2);
